@@ -1,359 +1,335 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { motion } from "framer-motion";
+import {
+  ArrowLeft,
+  Pause,
+  Play,
+  RefreshCw,
+  SkipForward,
+  RotateCcw,
+} from "lucide-react";
 
-const DEFAULT_ARRAY = [45, 23, 78, 12, 67, 34, 89, 10];
-
-type SortStatus = "idle" | "running" | "paused" | "completed";
+import { useBubbleSort } from "../../hooks/useBubbleSort";
 
 export default function SortingPage() {
-  const [array, setArray] = useState<number[]>(DEFAULT_ARRAY);
-  const [status, setStatus] = useState<SortStatus>("idle");
-  const [comparing, setComparing] = useState<number[]>([]);
-  const [swapping, setSwapping] = useState<number[]>([]);
-  const [speed, setSpeed] = useState(500);
-  const [comparisons, setComparisons] = useState(0);
-  const [swaps, setSwaps] = useState(0);
+  const {
+    array,
+    status,
+    comparing,
+    swapping,
+    comparisons,
+    swaps,
+    speed,
+    setSpeed,
+    start,
+    pause,
+    reset,
+    randomize,
+    step,
+  } = useBubbleSort();
 
-  const arrayRef = useRef<number[]>(DEFAULT_ARRAY);
-  const iRef = useRef(0);
-  const jRef = useRef(0);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    arrayRef.current = array;
-  }, [array]);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
-    };
-  }, []);
-
-  function randomizeArray() {
-    stopTimer();
-
-    const newArray = Array.from({ length: 8 }, () =>
-      Math.floor(Math.random() * 90) + 10
-    );
-
-    arrayRef.current = newArray;
-    setArray(newArray);
-    setStatus("idle");
-    setComparing([]);
-    setSwapping([]);
-    setComparisons(0);
-    setSwaps(0);
-    iRef.current = 0;
-    jRef.current = 0;
-  }
-
-  function resetArray() {
-    stopTimer();
-
-    arrayRef.current = DEFAULT_ARRAY;
-    setArray(DEFAULT_ARRAY);
-    setStatus("idle");
-    setComparing([]);
-    setSwapping([]);
-    setComparisons(0);
-    setSwaps(0);
-    iRef.current = 0;
-    jRef.current = 0;
-  }
-
-  function stopTimer() {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  }
-
-  function executeStep() {
-    const currentArray = [...arrayRef.current];
-    const n = currentArray.length;
-
-    if (iRef.current >= n - 1) {
-      setStatus("completed");
-      setComparing([]);
-      setSwapping([]);
-      stopTimer();
-      return;
-    }
-
-    if (jRef.current >= n - iRef.current - 1) {
-      iRef.current += 1;
-      jRef.current = 0;
-      executeStep();
-      return;
-    }
-
-    const leftIndex = jRef.current;
-    const rightIndex = jRef.current + 1;
-
-    setComparing([leftIndex, rightIndex]);
-    setComparisons((previous) => previous + 1);
-
-    if (currentArray[leftIndex] > currentArray[rightIndex]) {
-      setSwapping([leftIndex, rightIndex]);
-
-      [currentArray[leftIndex], currentArray[rightIndex]] = [
-        currentArray[rightIndex],
-        currentArray[leftIndex],
-      ];
-
-      arrayRef.current = currentArray;
-      setArray(currentArray);
-      setSwaps((previous) => previous + 1);
-    } else {
-      setSwapping([]);
-    }
-
-    jRef.current += 1;
-
-    if (jRef.current >= n - iRef.current - 1) {
-      iRef.current += 1;
-      jRef.current = 0;
-    }
-
-    if (iRef.current >= n - 1) {
-      setStatus("completed");
-      setComparing([]);
-      setSwapping([]);
-      stopTimer();
-    }
-  }
-
-  function startSorting() {
-    if (status === "completed") {
-      return;
-    }
-
-    setStatus("running");
-    runNextStep();
-  }
-
-  function runNextStep() {
-    executeStep();
-
-    timerRef.current = setTimeout(() => {
-      if (status !== "paused") {
-        runNextStep();
-      }
-    }, speed);
-  }
-
-  function pauseSorting() {
-    stopTimer();
-    setStatus("paused");
-  }
-
-  function stepSorting() {
-    if (status === "running" || status === "completed") {
-      return;
-    }
-
-    executeStep();
-  }
-
-  const isComparing = (index: number) => comparing.includes(index);
-  const isSwapping = (index: number) => swapping.includes(index);
+  const maxValue = Math.max(...array);
 
   return (
-    <main className="min-h-screen bg-slate-950 px-6 py-10 text-white">
-      <div className="mx-auto max-w-7xl">
-        <div className="mb-10">
-          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-cyan-400">
-            Sorting Visualizer
-          </p>
+    <main className="min-h-screen bg-slate-950 px-6 py-8 text-white">
+      <div className="mx-auto max-w-6xl">
+        {/* Header */}
 
-          <h1 className="mt-3 text-4xl font-bold sm:text-5xl">
-            Bubble Sort
-          </h1>
-
-          <p className="mt-4 max-w-2xl text-slate-400">
-            Watch Bubble Sort compare neighboring values and exchange them
-            when they are in the wrong order.
-          </p>
-        </div>
-
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-          <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-sm text-slate-400">Current status</p>
-              <p className="mt-1 font-semibold capitalize text-cyan-400">
-                {status}
-              </p>
-            </div>
-
-            <div className="flex gap-6 text-sm">
-              <div>
-                <p className="text-slate-500">Comparisons</p>
-                <p className="mt-1 font-semibold">{comparisons}</p>
-              </div>
-
-              <div>
-                <p className="text-slate-500">Swaps</p>
-                <p className="mt-1 font-semibold">{swaps}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="mb-8 flex min-h-[360px] items-end justify-center gap-3 rounded-xl border border-slate-800 bg-slate-950 p-6">
-            {array.map((value, index) => {
-              const comparingBar = isComparing(index);
-              const swappingBar = isSwapping(index);
-
-              return (
-                <div
-                  key={`${index}-${value}`}
-                  className="flex h-full flex-1 flex-col items-center justify-end gap-2"
-                >
-                  <span
-                    className={`text-xs ${
-                      comparingBar
-                        ? "font-bold text-yellow-300"
-                        : "text-slate-400"
-                    }`}
-                  >
-                    {value}
-                  </span>
-
-                  <div
-                    className={`w-full rounded-t-lg transition-all duration-300 ${
-                      swappingBar
-                        ? "bg-rose-400"
-                        : comparingBar
-                          ? "bg-yellow-300"
-                          : "bg-cyan-400"
-                    }`}
-                    style={{
-                      height: `${value * 2.8}px`,
-                    }}
-                  />
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={randomizeArray}
-              className="rounded-lg bg-cyan-400 px-4 py-2 font-semibold text-slate-950 transition hover:bg-cyan-300"
+        <div className="mb-10 flex items-center justify-between">
+          <div>
+            <Link
+              href="/"
+              className="mb-4 inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
             >
-              Randomize
-            </button>
+              <ArrowLeft size={16} />
+              Back to Dashboard
+            </Link>
 
-            <button
-              onClick={startSorting}
-              disabled={status === "running" || status === "completed"}
-              className="rounded-lg bg-emerald-400 px-4 py-2 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Start
-            </button>
+            <h1 className="text-4xl font-bold">
+              Bubble Sort
+            </h1>
 
-            <button
-              onClick={pauseSorting}
-              disabled={status !== "running"}
-              className="rounded-lg bg-amber-300 px-4 py-2 font-semibold text-slate-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Pause
-            </button>
-
-            <button
-              onClick={stepSorting}
-              disabled={status === "running" || status === "completed"}
-              className="rounded-lg bg-violet-400 px-4 py-2 font-semibold text-slate-950 transition hover:bg-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Step
-            </button>
-
-            <button
-              onClick={resetArray}
-              className="rounded-lg border border-slate-700 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-800"
-            >
-              Reset
-            </button>
-          </div>
-
-          <div className="mt-6 max-w-md">
-            <div className="flex items-center justify-between text-sm">
-              <label htmlFor="speed" className="text-slate-400">
-                Animation speed
-              </label>
-
-              <span className="text-slate-300">{speed} ms</span>
-            </div>
-
-            <input
-              id="speed"
-              type="range"
-              min="100"
-              max="1000"
-              step="100"
-              value={speed}
-              onChange={(event) => setSpeed(Number(event.target.value))}
-              className="mt-3 w-full accent-cyan-400"
-            />
-          </div>
-
-          <div className="mt-6 flex flex-wrap gap-5 text-sm text-slate-400">
-            <div className="flex items-center gap-2">
-              <span className="h-3 w-3 rounded-sm bg-cyan-400" />
-              Unselected
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="h-3 w-3 rounded-sm bg-yellow-300" />
-              Comparing
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="h-3 w-3 rounded-sm bg-rose-400" />
-              Swapping
-            </div>
-          </div>
-        </section>
-
-        <section className="mt-8 grid gap-6 md:grid-cols-2">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-            <h2 className="text-xl font-semibold">How it works</h2>
-
-            <p className="mt-4 leading-7 text-slate-400">
-              Bubble Sort compares adjacent values. If the left value is
-              greater than the right value, the two values are swapped. After
-              each pass, the largest unsorted value moves toward the end of
-              the array.
+            <p className="mt-2 text-slate-400">
+              Visualize how Bubble Sort compares and
+              swaps neighboring elements.
             </p>
           </div>
 
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-            <h2 className="text-xl font-semibold">Complexity</h2>
-
-            <div className="mt-4 space-y-3 text-slate-400">
-              <p>
-                <span className="font-semibold text-white">Best case:</span>{" "}
-                O(n)
-              </p>
-
-              <p>
-                <span className="font-semibold text-white">Average case:</span>{" "}
-                O(n²)
-              </p>
-
-              <p>
-                <span className="font-semibold text-white">Worst case:</span>{" "}
-                O(n²)
-              </p>
-
-              <p>
-                <span className="font-semibold text-white">Space:</span> O(1)
-              </p>
-            </div>
+          <div className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-300">
+            Sorting Algorithm
           </div>
-        </section>
+        </div>
+
+        {/* Main Grid */}
+
+        <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+          {/* Visualization Panel */}
+
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+            <div className="mb-8 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold">
+                  Visualization
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-400">
+                  Compare adjacent values and move larger
+                  values toward the end.
+                </p>
+              </div>
+
+              <div
+                className={`rounded-full px-3 py-1 text-xs font-medium ${
+                  status === "running"
+                    ? "bg-emerald-400/10 text-emerald-300"
+                    : status === "completed"
+                    ? "bg-cyan-400/10 text-cyan-300"
+                    : "bg-slate-800 text-slate-400"
+                }`}
+              >
+                {status.toUpperCase()}
+              </div>
+            </div>
+
+            {/* Bars */}
+
+            <div className="flex h-[360px] items-end justify-center gap-3 rounded-xl border border-slate-800 bg-slate-950/70 px-6 py-6">
+              {array.map((value, index) => {
+                const isComparing =
+                  comparing.includes(index);
+
+                const isSwapping =
+                  swapping.includes(index);
+
+                const barHeight =
+                  (value / maxValue) * 260;
+
+                return (
+                  <div
+                    key={index}
+                    className="flex h-full flex-1 items-end justify-center"
+                  >
+                    <motion.div
+                      layout
+                      animate={{
+                        height: `${barHeight}px`,
+                      }}
+                      transition={{
+                        duration: 0.3,
+                      }}
+                      className={`flex w-full max-w-16 items-end justify-center rounded-t-lg pb-3 text-sm font-bold transition-colors duration-200 ${
+                        isSwapping
+                          ? "bg-rose-500 text-white"
+                          : isComparing
+                          ? "bg-amber-400 text-slate-950"
+                          : "bg-cyan-500 text-slate-950"
+                      }`}
+                      style={{
+                        minHeight: "40px",
+                      }}
+                    >
+                      {value}
+                    </motion.div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Legend */}
+
+            <div className="mt-5 flex flex-wrap gap-5 text-sm text-slate-400">
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full bg-cyan-500" />
+                Unselected
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full bg-amber-400" />
+                Comparing
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full bg-rose-500" />
+                Swapping
+              </div>
+            </div>
+
+            {/* Controls */}
+
+            <div className="mt-8 flex flex-wrap gap-3">
+              <button
+                onClick={randomize}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm transition hover:border-cyan-400 hover:text-cyan-300"
+              >
+                <RefreshCw size={16} />
+                Randomize
+              </button>
+
+              <button
+                onClick={start}
+                disabled={
+                  status === "running" ||
+                  status === "completed"
+                }
+                className="inline-flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Play size={16} />
+                Start
+              </button>
+
+              <button
+                onClick={pause}
+                disabled={status !== "running"}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm transition hover:border-amber-400 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Pause size={16} />
+                Pause
+              </button>
+
+              <button
+                onClick={step}
+                disabled={status === "completed"}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm transition hover:border-violet-400 hover:text-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <SkipForward size={16} />
+                Step
+              </button>
+
+              <button
+                onClick={() => reset()}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm transition hover:border-rose-400 hover:text-rose-300"
+              >
+                <RotateCcw size={16} />
+                Reset
+              </button>
+            </div>
+
+            {/* Speed */}
+
+            <div className="mt-8">
+              <div className="mb-2 flex justify-between text-sm">
+                <span className="text-slate-400">
+                  Animation Speed
+                </span>
+
+                <span className="text-slate-300">
+                  {speed} ms
+                </span>
+              </div>
+
+              <input
+                type="range"
+                min="100"
+                max="1200"
+                step="100"
+                value={speed}
+                onChange={(event) =>
+                  setSpeed(Number(event.target.value))
+                }
+                className="w-full accent-cyan-400"
+              />
+            </div>
+          </section>
+
+          {/* Statistics Panel */}
+
+          <aside className="space-y-6">
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+              <h2 className="mb-5 text-xl font-semibold">
+                Statistics
+              </h2>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="rounded-xl bg-slate-950 p-4">
+                  <p className="text-sm text-slate-400">
+                    Comparisons
+                  </p>
+
+                  <p className="mt-2 text-3xl font-bold text-amber-300">
+                    {comparisons}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-slate-950 p-4">
+                  <p className="text-sm text-slate-400">
+                    Swaps
+                  </p>
+
+                  <p className="mt-2 text-3xl font-bold text-rose-300">
+                    {swaps}
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+              <h2 className="mb-4 text-xl font-semibold">
+                How It Works
+              </h2>
+
+              <p className="text-sm leading-6 text-slate-400">
+                Bubble Sort repeatedly compares neighboring
+                elements. If the left element is larger than
+                the right element, they are swapped.
+              </p>
+
+              <p className="mt-4 text-sm leading-6 text-slate-400">
+                After each pass, the largest unsorted value
+                moves toward the end of the array.
+              </p>
+            </section>
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+              <h2 className="mb-4 text-xl font-semibold">
+                Complexity
+              </h2>
+
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">
+                    Best Case
+                  </span>
+
+                  <span className="font-mono text-cyan-300">
+                    O(n)
+                  </span>
+                </div>
+
+                <div className="flex justify-between">
+                  <span className="text-slate-400">
+                    Average Case
+                  </span>
+
+                  <span className="font-mono text-amber-300">
+                    O(n²)
+                  </span>
+                </div>
+
+                <div className="flex justify-between">
+                  <span className="text-slate-400">
+                    Worst Case
+                  </span>
+
+                  <span className="font-mono text-rose-300">
+                    O(n²)
+                  </span>
+                </div>
+
+                <div className="flex justify-between">
+                  <span className="text-slate-400">
+                    Space
+                  </span>
+
+                  <span className="font-mono text-violet-300">
+                    O(1)
+                  </span>
+                </div>
+              </div>
+            </section>
+          </aside>
+        </div>
       </div>
     </main>
   );
