@@ -2,7 +2,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-
+import { binarySearchAPI } from "@/lib/api";
 type SearchStatus =
   | "idle"
   | "running"
@@ -48,50 +48,64 @@ export function useBinarySearch() {
     ) {
       return;
     }
-
+  
     pausedRef.current = false;
     stopRef.current = false;
-
+  
     setStatus("running");
     setCurrentIndex(-1);
     setComparisons(0);
-
-    let left = 0;
-    let right = array.length - 1;
-
-    while (left <= right) {
-      if (stopRef.current) {
-        return;
+  
+    try {
+      const result = await binarySearchAPI(
+        array,
+        target
+      );
+  
+      let left = 0;
+      let right = array.length - 1;
+  
+      while (left <= right) {
+        if (stopRef.current) {
+          return;
+        }
+  
+        await waitIfPaused();
+  
+        if (stopRef.current) {
+          return;
+        }
+  
+        const middle = Math.floor((left + right) / 2);
+  
+        setCurrentIndex(middle);
+  
+        setComparisons((prev) => prev + 1);
+  
+        await sleep(speed);
+  
+        if (middle === result.index) {
+          if (result.found) {
+            setStatus("found");
+          }
+  
+          return;
+        }
+  
+        if (array[middle] < target) {
+          left = middle + 1;
+        } else {
+          right = middle - 1;
+        }
       }
-
-      await waitIfPaused();
-
-      if (stopRef.current) {
-        return;
-      }
-
-      const middle = Math.floor((left + right) / 2);
-
-      setCurrentIndex(middle);
-
-      setComparisons((value) => value + 1);
-
-      await sleep(speed);
-
-      if (array[middle] === target) {
-        setStatus("found");
-        return;
-      }
-
-      if (array[middle] < target) {
-        left = middle + 1;
-      } else {
-        right = middle - 1;
-      }
+  
+      setCurrentIndex(-1);
+      setStatus("not-found");
+    } catch (error) {
+      console.error("Binary Search API error:", error);
+  
+      setStatus("not-found");
     }
-
-    setCurrentIndex(-1);
-    setStatus("not-found");
   };
 
   const pause = () => {

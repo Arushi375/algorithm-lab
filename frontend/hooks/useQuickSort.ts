@@ -1,7 +1,13 @@
-
 "use client";
 
-import { useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
+import { quickSortAPI } from "@/lib/api";
 
 type SortStatus =
   | "idle"
@@ -9,215 +15,479 @@ type SortStatus =
   | "paused"
   | "completed";
 
-const initialArray = [72, 34, 91, 18, 56, 43, 27, 65];
+type QuickSortStep =
+  | {
+      type: "compare";
+      index1: number;
+      index2: number;
+    }
+  | {
+      type: "swap";
+      index1: number;
+      index2: number;
+      array: number[];
+    };
+
+const initialArray = [
+  72,
+  34,
+  91,
+  18,
+  56,
+  43,
+  27,
+  65,
+];
 
 export function useQuickSort() {
-  const [array, setArray] = useState(initialArray);
-  const [status, setStatus] = useState<SortStatus>("idle");
+  const [array, setArray] =
+    useState<number[]>([
+      ...initialArray,
+    ]);
 
-  const [comparing, setComparing] = useState<number[]>([]);
-  const [swapping, setSwapping] = useState<number[]>([]);
+  const [status, setStatus] =
+    useState<SortStatus>("idle");
 
-  const [comparisons, setComparisons] = useState(0);
-  const [moves, setMoves] = useState(0);
+  const [comparing, setComparing] =
+    useState<number[]>([]);
 
-  const [speed, setSpeed] = useState(500);
+  const [swapping, setSwapping] =
+    useState<number[]>([]);
 
-  const pausedRef = useRef(false);
-  const stopRef = useRef(false);
+  const [comparisons, setComparisons] =
+    useState(0);
 
-  const sleep = (ms: number) =>
-    new Promise<void>((resolve) => {
-      setTimeout(resolve, ms);
-    });
+  const [moves, setMoves] =
+    useState(0);
 
-  const waitIfPaused = async () => {
-    while (pausedRef.current && !stopRef.current) {
-      await sleep(100);
-    }
-  };
+  const [speed, setSpeed] =
+    useState(500);
 
-  const swap = (
-    arr: number[],
-    first: number,
-    second: number
-  ) => {
-    const temp = arr[first];
-    arr[first] = arr[second];
-    arr[second] = temp;
-  };
+  const stepsRef =
+    useRef<QuickSortStep[]>([]);
 
-  const partition = async (
-    arr: number[],
-    low: number,
-    high: number
-  ): Promise<number> => {
-    const pivot = arr[high];
+  const stepIndexRef =
+    useRef(0);
 
-    let i = low - 1;
+  const statusRef =
+    useRef<SortStatus>("idle");
 
-    for (let j = low; j < high; j++) {
-      if (stopRef.current) {
-        return high;
-      }
+  const backendResultRef =
+    useRef<number[] | null>(null);
 
-      await waitIfPaused();
+  /*
+   * Create all Quick Sort visualization
+   * operations before the animation starts.
+   */
+  const createSteps = useCallback(
+    (inputArray: number[]) => {
+      const arr = [...inputArray];
 
-      setComparing([j, high]);
-      setComparisons((value) => value + 1);
+      const steps: QuickSortStep[] = [];
 
-      await sleep(speed);
+      const partition = (
+        low: number,
+        high: number
+      ): number => {
+        const pivot = arr[high];
 
-      if (arr[j] < pivot) {
-        i++;
+        let i = low - 1;
 
-        if (i !== j) {
-          setSwapping([i, j]);
+        for (
+          let j = low;
+          j < high;
+          j++
+        ) {
+          /*
+           * One comparison.
+           */
+          steps.push({
+            type: "compare",
+            index1: j,
+            index2: high,
+          });
 
-          swap(arr, i, j);
+          if (arr[j] < pivot) {
+            i++;
 
-          setArray([...arr]);
+            if (i !== j) {
+              /*
+               * One swap.
+               */
+              const temp = arr[i];
 
-          setMoves((value) => value + 1);
+              arr[i] = arr[j];
+              arr[j] = temp;
 
-          await sleep(speed);
-
-          setSwapping([]);
+              steps.push({
+                type: "swap",
+                index1: i,
+                index2: j,
+                array: [...arr],
+              });
+            }
+          }
         }
+
+        /*
+         * Put pivot into its final position.
+         */
+        if (i + 1 !== high) {
+          const temp = arr[i + 1];
+
+          arr[i + 1] = arr[high];
+          arr[high] = temp;
+
+          steps.push({
+            type: "swap",
+            index1: i + 1,
+            index2: high,
+            array: [...arr],
+          });
+        }
+
+        return i + 1;
+      };
+
+      const sort = (
+        low: number,
+        high: number
+      ): void => {
+        if (low >= high) {
+          return;
+        }
+
+        const pivotIndex = partition(
+          low,
+          high
+        );
+
+        sort(
+          low,
+          pivotIndex - 1
+        );
+
+        sort(
+          pivotIndex + 1,
+          high
+        );
+      };
+
+      sort(
+        0,
+        arr.length - 1
+      );
+
+      return steps;
+    },
+    []
+  );
+
+  /*
+   * Perform exactly ONE visualization
+   * operation.
+   */
+  const performStep = useCallback(() => {
+    const steps = stepsRef.current;
+
+    const currentIndex =
+      stepIndexRef.current;
+
+    /*
+     * Sorting is finished.
+     */
+    if (
+      currentIndex >= steps.length
+    ) {
+      setComparing([]);
+      setSwapping([]);
+
+      if (
+        backendResultRef.current
+      ) {
+        setArray([
+          ...backendResultRef.current,
+        ]);
       }
 
-      setComparing([]);
+      statusRef.current =
+        "completed";
+
+      setStatus("completed");
+
+      return;
     }
 
-    if (stopRef.current) {
-      return high;
-    }
+    const currentStep =
+      steps[currentIndex];
 
-    await waitIfPaused();
-
-    if (i + 1 !== high) {
-      setSwapping([i + 1, high]);
-
-      swap(arr, i + 1, high);
-
-      setArray([...arr]);
-
-      setMoves((value) => value + 1);
-
-      await sleep(speed);
+    /*
+     * Comparison step.
+     */
+    if (
+      currentStep.type ===
+      "compare"
+    ) {
+      setComparing([
+        currentStep.index1,
+        currentStep.index2,
+      ]);
 
       setSwapping([]);
+
+      setComparisons(
+        (value) => value + 1
+      );
     }
 
-    return i + 1;
-  };
-
-  const quickSort = async (
-    arr: number[],
-    low: number,
-    high: number
-  ): Promise<void> => {
-    if (low >= high || stopRef.current) {
-      return;
-    }
-
-    await waitIfPaused();
-
-    const pivotIndex = await partition(
-      arr,
-      low,
-      high
-    );
-
-    if (stopRef.current) {
-      return;
-    }
-
-    await quickSort(
-      arr,
-      low,
-      pivotIndex - 1
-    );
-
-    await quickSort(
-      arr,
-      pivotIndex + 1,
-      high
-    );
-  };
-
-  const start = async () => {
+    /*
+     * Swap step.
+     */
     if (
-      status === "running" ||
-      status === "completed"
+      currentStep.type ===
+      "swap"
+    ) {
+      setComparing([]);
+
+      setSwapping([
+        currentStep.index1,
+        currentStep.index2,
+      ]);
+
+      setArray([
+        ...currentStep.array,
+      ]);
+
+      setMoves(
+        (value) => value + 1
+      );
+    }
+
+    stepIndexRef.current++;
+  }, []);
+
+  /*
+   * Automatically perform one step
+   * according to the selected speed.
+   */
+  useEffect(() => {
+    if (status !== "running") {
+      return;
+    }
+
+    const timer =
+      window.setInterval(() => {
+        if (
+          statusRef.current ===
+          "running"
+        ) {
+          performStep();
+        }
+      }, speed);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [
+    status,
+    speed,
+    performStep,
+  ]);
+
+  /*
+   * Start Quick Sort.
+   */
+  const start = useCallback(
+    async () => {
+      if (
+        statusRef.current ===
+          "running" ||
+        statusRef.current ===
+          "completed"
+      ) {
+        return;
+      }
+
+      try {
+        /*
+         * Get the final answer from
+         * FastAPI.
+         */
+        const result =
+          await quickSortAPI(
+            array
+          );
+
+        backendResultRef.current =
+          result.array;
+
+        /*
+         * Build the visualization
+         * operations from the current array.
+         */
+        stepsRef.current =
+          createSteps(array);
+
+        stepIndexRef.current = 0;
+
+        setComparisons(0);
+        setMoves(0);
+
+        setComparing([]);
+        setSwapping([]);
+
+        statusRef.current =
+          "running";
+
+        setStatus("running");
+      } catch (error) {
+        console.error(
+          "Quick Sort API error:",
+          error
+        );
+
+        statusRef.current =
+          "idle";
+
+        setStatus("idle");
+      }
+    },
+    [array, createSteps]
+  );
+
+  /*
+   * Pause the animation.
+   */
+  const pause = useCallback(() => {
+    if (
+      statusRef.current !==
+      "running"
     ) {
       return;
     }
 
-    pausedRef.current = false;
-    stopRef.current = false;
+    statusRef.current =
+      "paused";
 
-    setStatus("running");
-    setComparisons(0);
-    setMoves(0);
+    setStatus("paused");
+
     setComparing([]);
     setSwapping([]);
+  }, []);
 
-    const arr = [...array];
+  /*
+   * Manually perform ONE step.
+   */
+  const step = useCallback(() => {
+    /*
+     * Don't allow manual stepping
+     * while automatic animation is running.
+     */
+    if (
+      statusRef.current ===
+      "running"
+    ) {
+      return;
+    }
 
-    await quickSort(
-      arr,
-      0,
-      arr.length - 1
-    );
+    /*
+     * If we haven't created the
+     * operations yet, create them.
+     */
+    if (
+      stepsRef.current.length === 0
+    ) {
+      stepsRef.current =
+        createSteps(array);
 
-    if (!stopRef.current) {
-      setArray(arr);
+      stepIndexRef.current = 0;
+
+      backendResultRef.current =
+        null;
+
+      setComparisons(0);
+      setMoves(0);
+
       setComparing([]);
       setSwapping([]);
-      setStatus("completed");
     }
-  };
 
-  const pause = () => {
-    if (status === "running") {
-      pausedRef.current = true;
-      setStatus("paused");
-    }
-  };
+    /*
+     * Make sure we're in paused/idle
+     * state while manually stepping.
+     */
+    statusRef.current =
+      "paused";
 
-  const step = () => {
-    // Step functionality can be added later.
-  };
+    setStatus("paused");
 
-  const randomize = () => {
-    stopRef.current = true;
-    pausedRef.current = false;
+    performStep();
+  }, [
+    array,
+    createSteps,
+    performStep,
+  ]);
 
-    const newArray = Array.from(
-      { length: 8 },
-      () => Math.floor(Math.random() * 90) + 10
-    );
+  /*
+   * Generate a new random array.
+   */
+  const randomize = useCallback(() => {
+    const newArray =
+      Array.from(
+        { length: 8 },
+        () =>
+          Math.floor(
+            Math.random() * 90
+          ) + 10
+      );
+
+    stepsRef.current = [];
+
+    stepIndexRef.current = 0;
+
+    backendResultRef.current =
+      null;
+
+    statusRef.current =
+      "idle";
 
     setArray(newArray);
+
     setStatus("idle");
+
     setComparing([]);
     setSwapping([]);
+
     setComparisons(0);
     setMoves(0);
-  };
+  }, []);
 
-  const reset = () => {
-    stopRef.current = true;
-    pausedRef.current = false;
+  /*
+   * Reset to the original array.
+   */
+  const reset = useCallback(() => {
+    stepsRef.current = [];
 
-    setArray(initialArray);
+    stepIndexRef.current = 0;
+
+    backendResultRef.current =
+      null;
+
+    statusRef.current =
+      "idle";
+
+    setArray([
+      ...initialArray,
+    ]);
+
     setStatus("idle");
+
     setComparing([]);
     setSwapping([]);
+
     setComparisons(0);
     setMoves(0);
-  };
+  }, []);
 
   return {
     array,

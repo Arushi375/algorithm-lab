@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-
+import { selectionSortAPI } from "@/lib/api";
 export type SortStatus =
   | "idle"
   | "running"
@@ -39,7 +39,7 @@ export function useSelectionSort(
   const minIndexRef = useRef(0);
 
   const statusRef = useRef<SortStatus>("idle");
-
+  const backendResultRef = useRef<number[] | null>(null);
   const step = useCallback(() => {
     if (statusRef.current === "completed") {
       return;
@@ -51,11 +51,23 @@ export function useSelectionSort(
     // Sorting is finished.
     if (iRef.current >= n - 1) {
       setStatus("completed");
+    
       statusRef.current = "completed";
-
+    
       setComparing([]);
+    
       setSwapping([]);
-
+    
+      if (backendResultRef.current) {
+        arrayRef.current = [
+          ...backendResultRef.current,
+        ];
+    
+        setArray([
+          ...backendResultRef.current,
+        ]);
+      }
+    
       return;
     }
 
@@ -120,13 +132,26 @@ export function useSelectionSort(
     };
   }, [status, speed, step]);
 
-  const start = useCallback(() => {
+  const start = useCallback(async () => {
     if (statusRef.current === "completed") {
       return;
     }
-
-    statusRef.current = "running";
-    setStatus("running");
+  
+    try {
+      const result = await selectionSortAPI(
+        arrayRef.current
+      );
+  
+      backendResultRef.current = result.array;
+  
+      statusRef.current = "running";
+      setStatus("running");
+    } catch (error) {
+      console.error(
+        "Selection Sort API error:",
+        error
+      );
+    }
   }, []);
 
   const pause = useCallback(() => {
@@ -146,23 +171,27 @@ export function useSelectionSort(
   }, [step]);
 
   const reset = useCallback(
-    (newArray: number[] = initialArray) => {
-      const values = [...newArray];
-
+    (newArray?: number[]) => {
+      const valuesToUse = Array.isArray(newArray)
+        ? newArray
+        : initialArray;
+  
+      const values = [...valuesToUse];
+  
       arrayRef.current = values;
-
+  
       iRef.current = 0;
       jRef.current = 1;
       minIndexRef.current = 0;
-
+  
       statusRef.current = "idle";
-
+  
+      backendResultRef.current = null;
+  
       setArray(values);
       setStatus("idle");
-
       setComparing([]);
       setSwapping([]);
-
       setComparisons(0);
       setSwaps(0);
     },

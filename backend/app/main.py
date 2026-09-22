@@ -1,5 +1,9 @@
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.routes.searching import router as searching_router
+from app.routes.sorting import router as sorting_router
 
 app = FastAPI(
     title="Algorithm Lab API",
@@ -7,7 +11,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Allow requests from our local Next.js frontend.
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -19,15 +23,19 @@ app.add_middleware(
 )
 
 
+app.include_router(searching_router)
+app.include_router(sorting_router)
+
 @app.get("/")
 def root():
     return {
-        "message": "Welcome to the Algorithm Lab API"
+        "message": "Algorithm Lab API is running"
     }
 
 
 @app.get("/health")
 def health_check():
     return {
-        "status": "ok"
+        "status": "healthy"
     }
+

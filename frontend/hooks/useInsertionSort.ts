@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-
+import { insertionSortAPI } from "@/lib/api";
 export type SortStatus =
   | "idle"
   | "running"
@@ -40,6 +40,7 @@ export function useInsertionSort(
   const keyRef = useRef<number | null>(null);
 
   const statusRef = useRef<SortStatus>("idle");
+  const backendResultRef = useRef<number[] | null>(null);
 
   /*
    * Perform ONE step of insertion sort.
@@ -56,10 +57,19 @@ export function useInsertionSort(
     if (iRef.current >= n) {
       setStatus("completed");
       statusRef.current = "completed";
-
       setComparing([]);
       setSwapping([]);
-
+    
+      if (backendResultRef.current) {
+        arrayRef.current = [
+          ...backendResultRef.current,
+        ];
+    
+        setArray([
+          ...backendResultRef.current,
+        ]);
+      }
+    
       return;
     }
 
@@ -139,13 +149,26 @@ export function useInsertionSort(
   /*
    * Start sorting.
    */
-  const start = useCallback(() => {
+  const start = useCallback(async () => {
     if (statusRef.current === "completed") {
       return;
     }
-
-    statusRef.current = "running";
-    setStatus("running");
+  
+    try {
+      const result = await insertionSortAPI(
+        arrayRef.current
+      );
+  
+      backendResultRef.current = result.array;
+  
+      statusRef.current = "running";
+      setStatus("running");
+    } catch (error) {
+      console.error(
+        "Insertion Sort API error:",
+        error
+      );
+    }
   }, []);
 
   /*
@@ -174,23 +197,25 @@ export function useInsertionSort(
    * Reset the algorithm.
    */
   const reset = useCallback(
-    (newArray: number[] = initialArray) => {
-      const values = [...newArray];
-
+    (newArray?: number[]) => {
+      const valuesToUse = Array.isArray(newArray)
+        ? newArray
+        : initialArray;
+  
+      const values = [...valuesToUse];
+  
       arrayRef.current = values;
-
       iRef.current = 1;
       jRef.current = 0;
       keyRef.current = null;
-
       statusRef.current = "idle";
-
+  
+      backendResultRef.current = null;
+  
       setArray(values);
       setStatus("idle");
-
       setComparing([]);
       setSwapping([]);
-
       setComparisons(0);
       setMoves(0);
     },

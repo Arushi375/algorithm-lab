@@ -1,6 +1,8 @@
+
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { bubbleSortAPI } from "@/lib/api";
 
 export type SortStatus =
   | "idle"
@@ -33,6 +35,8 @@ export function useBubbleSort(
   const jRef = useRef(0);
   const statusRef = useRef<SortStatus>("idle");
 
+  const backendResultRef = useRef<number[] | null>(null);
+
   const step = useCallback(() => {
     const values = [...arrayRef.current];
     const n = values.length;
@@ -48,6 +52,12 @@ export function useBubbleSort(
       setStatus("completed");
       setComparing([]);
       setSwapping([]);
+
+      if (backendResultRef.current) {
+        arrayRef.current = [...backendResultRef.current];
+        setArray([...backendResultRef.current]);
+      }
+
       return;
     }
 
@@ -61,6 +71,7 @@ export function useBubbleSort(
 
     if (values[left] > values[right]) {
       const temporary = values[left];
+
       values[left] = values[right];
       values[right] = temporary;
 
@@ -81,6 +92,11 @@ export function useBubbleSort(
     if (iRef.current >= n - 1) {
       statusRef.current = "completed";
       setStatus("completed");
+
+      if (backendResultRef.current) {
+        arrayRef.current = [...backendResultRef.current];
+        setArray([...backendResultRef.current]);
+      }
     }
   }, []);
 
@@ -100,13 +116,23 @@ export function useBubbleSort(
     };
   }, [status, speed, step]);
 
-  const start = useCallback(() => {
+  const start = useCallback(async () => {
     if (statusRef.current === "completed") {
       return;
     }
 
-    statusRef.current = "running";
-    setStatus("running");
+    try {
+      const result = await bubbleSortAPI(
+        arrayRef.current
+      );
+
+      backendResultRef.current = result.array;
+
+      statusRef.current = "running";
+      setStatus("running");
+    } catch (error) {
+      console.error("Bubble Sort API error:", error);
+    }
   }, []);
 
   const pause = useCallback(() => {
@@ -115,14 +141,20 @@ export function useBubbleSort(
   }, []);
 
   const reset = useCallback(
-    (newArray: number[] = initialArray) => {
-      const copiedArray = [...newArray];
-
+    (newArray?: number[]) => {
+      const values = Array.isArray(newArray)
+        ? newArray
+        : initialArray;
+  
+      const copiedArray = [...values];
+  
       arrayRef.current = copiedArray;
       iRef.current = 0;
       jRef.current = 0;
       statusRef.current = "idle";
-
+  
+      backendResultRef.current = null;
+  
       setArray(copiedArray);
       setStatus("idle");
       setComparing([]);
@@ -135,14 +167,14 @@ export function useBubbleSort(
 
   const randomize = useCallback(() => {
     console.log("randomize function called");
-  
+
     const randomArray = Array.from(
       { length: 8 },
       () => Math.floor(Math.random() * 90) + 10
     );
-  
+
     console.log("new array:", randomArray);
-  
+
     reset(randomArray);
   }, [reset]);
 
@@ -162,3 +194,4 @@ export function useBubbleSort(
     step,
   };
 }
+

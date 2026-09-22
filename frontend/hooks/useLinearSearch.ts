@@ -1,6 +1,6 @@
 
 "use client";
-
+import { linearSearchAPI } from "@/lib/api";
 import { useRef, useState } from "react";
 
 type SearchStatus =
@@ -40,21 +40,28 @@ export function useLinearSearch() {
     }
   };
 
-  const start = async () => {
-    if (
-      status === "running" ||
-      status === "found" ||
-      status === "not-found"
-    ) {
-      return;
-    }
 
-    pausedRef.current = false;
-    stopRef.current = false;
+const start = async () => {
+  if (
+    status === "running" ||
+    status === "found" ||
+    status === "not-found"
+  ) {
+    return;
+  }
 
-    setStatus("running");
-    setCurrentIndex(-1);
-    setComparisons(0);
+  pausedRef.current = false;
+  stopRef.current = false;
+
+  setStatus("running");
+  setCurrentIndex(-1);
+  setComparisons(0);
+
+  try {
+    const result = await linearSearchAPI(
+      array,
+      target
+    );
 
     for (let i = 0; i < array.length; i++) {
       if (stopRef.current) {
@@ -69,19 +76,29 @@ export function useLinearSearch() {
 
       setCurrentIndex(i);
 
-      setComparisons((value) => value + 1);
+      setComparisons(i + 1);
 
       await sleep(speed);
 
-      if (array[i] === target) {
-        setStatus("found");
+      if (i === result.index) {
+        if (result.found) {
+          setStatus("found");
+        }
+
         return;
       }
     }
 
     setCurrentIndex(-1);
     setStatus("not-found");
-  };
+  } catch (error) {
+    console.error("Linear Search API error:", error);
+
+    setStatus("not-found");
+  }
+};
+
+
 
   const pause = () => {
     if (status === "running") {
