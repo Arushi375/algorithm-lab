@@ -1,7 +1,17 @@
-
 "use client";
+
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
 import { linearSearchAPI } from "@/lib/api";
-import { useRef, useState } from "react";
+
+import type {
+  SearchTraceFrame,
+} from "@/components/algorithm/SearchTracePanel";
 
 type SearchStatus =
   | "idle"
@@ -10,11 +20,27 @@ type SearchStatus =
   | "found"
   | "not-found";
 
-const initialArray = [42, 17, 83, 29, 61, 8, 95, 34];
+const initialArray = [
+  42,
+  17,
+  83,
+  29,
+  61,
+  8,
+  95,
+  34,
+];
 
 export function useLinearSearch() {
-  const [array, setArray] = useState(initialArray);
-  const [target, setTarget] = useState(61);
+  // ==========================================
+  // STATE
+  // ==========================================
+
+  const [array, setArray] =
+    useState(initialArray);
+
+  const [target, setTarget] =
+    useState(61);
 
   const [status, setStatus] =
     useState<SearchStatus>("idle");
@@ -22,159 +48,411 @@ export function useLinearSearch() {
   const [currentIndex, setCurrentIndex] =
     useState(-1);
 
-  const [comparisons, setComparisons] = useState(0);
+  const [comparisons, setComparisons] =
+    useState(0);
 
-  const [speed, setSpeed] = useState(500);
+  const [speed, setSpeed] =
+    useState(500);
 
-  const pausedRef = useRef(false);
-  const stopRef = useRef(false);
+  const [traceFrames, setTraceFrames] =
+    useState<SearchTraceFrame[]>([]);
 
-  const sleep = (ms: number) =>
-    new Promise<void>((resolve) => {
-      setTimeout(resolve, ms);
-    });
+  const [currentTraceStep, setCurrentTraceStep] =
+    useState(0);
 
-  const waitIfPaused = async () => {
-    while (pausedRef.current && !stopRef.current) {
-      await sleep(100);
-    }
-  };
+  // ==========================================
+  // REFS
+  // ==========================================
 
+  const arrayRef =
+    useRef(initialArray);
 
-const start = async () => {
-  if (
-    status === "running" ||
-    status === "found" ||
-    status === "not-found"
-  ) {
-    return;
-  }
+  const targetRef =
+    useRef(61);
 
-  pausedRef.current = false;
-  stopRef.current = false;
+  const statusRef =
+    useRef<SearchStatus>("idle");
 
-  setStatus("running");
-  setCurrentIndex(-1);
-  setComparisons(0);
+  const currentIndexRef =
+    useRef(-1);
 
-  try {
-    const result = await linearSearchAPI(
-      array,
-      target
-    );
+  const comparisonsRef =
+    useRef(0);
 
-    for (let i = 0; i < array.length; i++) {
-      if (stopRef.current) {
-        return;
-      }
+  const backendResultRef =
+    useRef<{
+      found: boolean;
+      index: number;
+    } | null>(null);
 
-      await waitIfPaused();
+  // ==========================================
+  // KEEP REFS IN SYNC
+  // ==========================================
 
-      if (stopRef.current) {
-        return;
-      }
+  useEffect(() => {
+    arrayRef.current = array;
+  }, [array]);
 
-      setCurrentIndex(i);
+  useEffect(() => {
+    targetRef.current = target;
+  }, [target]);
 
-      setComparisons(i + 1);
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
-      await sleep(speed);
+  // ==========================================
+  // ADD TRACE FRAME
+  // ==========================================
 
-      if (i === result.index) {
-        if (result.found) {
-          setStatus("found");
-        }
+  const addTraceFrame = useCallback(
+    (
+      line: number,
+      label: string,
+      detail: string,
+      index: number,
+      value: number | null
+    ) => {
+      const nextStep =
+        traceFrames.length + 1;
 
-        return;
-      }
-    }
+      const frame: SearchTraceFrame = {
+        step: nextStep,
+        line,
 
-    setCurrentIndex(-1);
-    setStatus("not-found");
-  } catch (error) {
-    console.error("Linear Search API error:", error);
+        label,
+        detail,
 
-    setStatus("not-found");
-  }
-};
+        currentIndex: index,
 
+        target:
+          targetRef.current,
 
+        value,
 
-  const pause = () => {
-    if (status === "running") {
-      pausedRef.current = true;
-      setStatus("paused");
-    }
-  };
+        comparisons:
+          comparisonsRef.current,
+      };
 
-  const step = () => {
+      setTraceFrames((prev) => [
+        ...prev,
+        frame,
+      ]);
+
+      setCurrentTraceStep(nextStep);
+    },
+    [traceFrames.length]
+  );
+
+  // ==========================================
+  // STEP
+  // ==========================================
+
+  const step = useCallback(() => {
     if (
-      status === "running" ||
-      status === "found" ||
-      status === "not-found"
+      statusRef.current === "found" ||
+      statusRef.current === "not-found"
     ) {
       return;
     }
 
-    setStatus("running");
+    const currentArray =
+      arrayRef.current;
 
-    setCurrentIndex((previousIndex) => {
-      const nextIndex = previousIndex + 1;
+    const targetValue =
+      targetRef.current;
 
-      if (nextIndex >= array.length) {
-        setStatus("not-found");
-        return -1;
-      }
+    const index =
+      currentIndexRef.current + 1;
 
-      setComparisons((value) => value + 1);
+    // ----------------------------------------
+    // Search finished
+    // ----------------------------------------
 
-      if (array[nextIndex] === target) {
-        setStatus("found");
-      }
+    if (
+      index >= currentArray.length
+    ) {
+      currentIndexRef.current =
+        -1;
 
-      return nextIndex;
-    });
-  };
+      setCurrentIndex(-1);
 
-  const randomize = () => {
-    stopRef.current = true;
-    pausedRef.current = false;
+      statusRef.current =
+        "not-found";
 
-    const newArray = Array.from(
-      { length: 8 },
-      () => Math.floor(Math.random() * 90) + 10
+      setStatus("not-found");
+
+      addTraceFrame(
+        7,
+        "Target not found",
+        `The search reached the end of the array without finding target ${targetValue}.`,
+        -1,
+        null
+      );
+
+      return;
+    }
+
+    // ----------------------------------------
+    // Check current element
+    // ----------------------------------------
+
+    const value =
+      currentArray[index];
+
+    currentIndexRef.current =
+      index;
+
+    setCurrentIndex(index);
+
+    comparisonsRef.current += 1;
+
+    setComparisons(
+      comparisonsRef.current
     );
 
-    setArray(newArray);
-    setStatus("idle");
-    setCurrentIndex(-1);
-    setComparisons(0);
-  };
+    addTraceFrame(
+      4,
+      "Checking element",
+      `Comparing value ${value} at index ${index} with target ${targetValue}.`,
+      index,
+      value
+    );
 
-  const reset = () => {
-    stopRef.current = true;
-    pausedRef.current = false;
+    // ----------------------------------------
+    // Target found
+    // ----------------------------------------
+
+    if (value === targetValue) {
+      statusRef.current =
+        "found";
+
+      setStatus("found");
+
+      addTraceFrame(
+        6,
+        "Target found",
+        `The target ${targetValue} was found at index ${index}.`,
+        index,
+        value
+      );
+
+      return;
+    }
+
+    // ----------------------------------------
+    // Continue search
+    // ----------------------------------------
+
+    addTraceFrame(
+      5,
+      "Continue search",
+      `Value ${value} does not match target ${targetValue}, so the search continues with the next element.`,
+      index,
+      value
+    );
+  }, [addTraceFrame]);
+
+  // ==========================================
+  // START
+  // ==========================================
+
+  const start = useCallback(async () => {
+    if (
+      statusRef.current === "running" ||
+      statusRef.current === "found" ||
+      statusRef.current === "not-found"
+    ) {
+      return;
+    }
+
+    try {
+      // --------------------------------------
+      // Backend validation
+      // --------------------------------------
+
+      const result =
+        await linearSearchAPI(
+          arrayRef.current,
+          targetRef.current
+        );
+
+      backendResultRef.current = {
+        found: result.found,
+        index: result.index,
+      };
+
+      // --------------------------------------
+      // Start / resume
+      // --------------------------------------
+
+      statusRef.current =
+        "running";
+
+      setStatus("running");
+    } catch (error) {
+      console.error(
+        "Linear Search API error:",
+        error
+      );
+
+      statusRef.current =
+        "not-found";
+
+      setStatus("not-found");
+    }
+  }, []);
+
+  // ==========================================
+  // PAUSE
+  // ==========================================
+
+  const pause = useCallback(() => {
+    if (
+      statusRef.current !== "running"
+    ) {
+      return;
+    }
+
+    statusRef.current =
+      "paused";
+
+    setStatus("paused");
+  }, []);
+
+  // ==========================================
+  // AUTOMATIC EXECUTION
+  // ==========================================
+
+  useEffect(() => {
+    if (status !== "running") {
+      return;
+    }
+
+    const timer =
+      window.setTimeout(() => {
+        step();
+      }, speed);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [
+    status,
+    speed,
+    currentTraceStep,
+    step,
+  ]);
+
+  // ==========================================
+  // RANDOMIZE
+  // ==========================================
+
+  const randomize = useCallback(() => {
+    const newArray =
+      Array.from(
+        { length: 8 },
+        () =>
+          Math.floor(
+            Math.random() * 90
+          ) + 10
+      );
+
+    arrayRef.current =
+      newArray;
+
+    targetRef.current = 61;
+
+    currentIndexRef.current =
+      -1;
+
+    comparisonsRef.current =
+      0;
+
+    backendResultRef.current =
+      null;
+
+    statusRef.current =
+      "idle";
+
+    setArray(newArray);
+
+    setTarget(61);
+
+    setStatus("idle");
+
+    setCurrentIndex(-1);
+
+    setComparisons(0);
+
+    setTraceFrames([]);
+
+    setCurrentTraceStep(0);
+  }, []);
+
+  // ==========================================
+  // RESET
+  // ==========================================
+
+  const reset = useCallback(() => {
+    arrayRef.current =
+      initialArray;
+
+    targetRef.current = 61;
+
+    currentIndexRef.current =
+      -1;
+
+    comparisonsRef.current =
+      0;
+
+    backendResultRef.current =
+      null;
+
+    statusRef.current =
+      "idle";
 
     setArray(initialArray);
+
     setTarget(61);
+
     setStatus("idle");
+
     setCurrentIndex(-1);
+
     setComparisons(0);
-  };
+
+    setTraceFrames([]);
+
+    setCurrentTraceStep(0);
+  }, []);
+
+  // ==========================================
+  // RETURN
+  // ==========================================
 
   return {
     array,
     target,
+
     status,
+
     currentIndex,
     comparisons,
+
     speed,
     setSpeed,
+
     setTarget,
+
     start,
     pause,
     step,
+
     randomize,
     reset,
+
+    traceFrames,
+    currentTraceStep,
   };
 }

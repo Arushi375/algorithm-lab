@@ -4,7 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.routes.searching import router as searching_router
 from app.routes.sorting import router as sorting_router
-
+from app.routes import graphs
+from app.routes import pathfinding
 app = FastAPI(
     title="Algorithm Lab API",
     description="Backend API for the Algorithm Lab project",
@@ -22,9 +23,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
+app.include_router(pathfinding.router)
 app.include_router(searching_router)
 app.include_router(sorting_router)
+app.include_router(graphs.router)
 
 @app.get("/")
 def root():

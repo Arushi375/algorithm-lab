@@ -19,6 +19,10 @@ export default function InsertionSortPage() {
     step,
     randomize,
     reset,
+
+    // Trace data
+    traceFrames,
+    currentTraceStep,
   } = useInsertionSort();
 
   return (
@@ -38,12 +42,18 @@ export default function InsertionSortPage() {
       step={step}
       randomize={randomize}
       reset={() => reset()}
+
+      // Trace data
+      traceFrames={traceFrames}
+      currentTraceStep={currentTraceStep}
+
       complexity={{
         best: "O(n)",
         average: "O(n²)",
         worst: "O(n²)",
         space: "O(1)",
       }}
+
       explanation={
         <div className="space-y-4">
           <p>
@@ -75,6 +85,7 @@ export default function InsertionSortPage() {
           </div>
         </div>
       }
+
       languages={insertionSortCode}
     />
   );

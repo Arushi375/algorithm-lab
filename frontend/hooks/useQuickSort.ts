@@ -9,26 +9,15 @@ import {
 
 import { quickSortAPI } from "@/lib/api";
 
-type SortStatus =
+import type { SortingTraceFrame } from "@/types/sortingTrace";
+
+export type SortStatus =
   | "idle"
   | "running"
   | "paused"
   | "completed";
 
-type QuickSortStep =
-  | {
-      type: "compare";
-      index1: number;
-      index2: number;
-    }
-  | {
-      type: "swap";
-      index1: number;
-      index2: number;
-      array: number[];
-    };
-
-const initialArray = [
+const DEFAULT_ARRAY = [
   72,
   34,
   91,
@@ -39,11 +28,12 @@ const initialArray = [
   65,
 ];
 
-export function useQuickSort() {
-  const [array, setArray] =
-    useState<number[]>([
-      ...initialArray,
-    ]);
+export function useQuickSort(
+  initialArray: number[] = DEFAULT_ARRAY
+) {
+  const [array, setArray] = useState<number[]>([
+    ...initialArray,
+  ]);
 
   const [status, setStatus] =
     useState<SortStatus>("idle");
@@ -57,307 +47,579 @@ export function useQuickSort() {
   const [comparisons, setComparisons] =
     useState(0);
 
-  const [moves, setMoves] =
+  const [moves, setMoves] = useState(0);
+
+  const [speed, setSpeed] = useState(500);
+
+  // -----------------------------------------
+  // TRACE STATE
+  // -----------------------------------------
+
+  const [traceFrames, setTraceFrames] =
+    useState<SortingTraceFrame[]>([]);
+
+  const [currentTraceStep, setCurrentTraceStep] =
     useState(0);
 
-  const [speed, setSpeed] =
-    useState(500);
+  // -----------------------------------------
+  // REFS
+  // -----------------------------------------
 
-  const stepsRef =
-    useRef<QuickSortStep[]>([]);
-
-  const stepIndexRef =
-    useRef(0);
+  const arrayRef = useRef([
+    ...initialArray,
+  ]);
 
   const statusRef =
     useRef<SortStatus>("idle");
 
+  const comparisonsRef = useRef(0);
+
+  const movesRef = useRef(0);
+
   const backendResultRef =
     useRef<number[] | null>(null);
 
-  /*
-   * Create all Quick Sort visualization
-   * operations before the animation starts.
-   */
-  const createSteps = useCallback(
-    (inputArray: number[]) => {
-      const arr = [...inputArray];
+  // -----------------------------------------
+  // QUICK SORT STATE
+  // -----------------------------------------
 
-      const steps: QuickSortStep[] = [];
+  const lowRef = useRef(0);
 
-      const partition = (
-        low: number,
-        high: number
-      ): number => {
-        const pivot = arr[high];
-
-        let i = low - 1;
-
-        for (
-          let j = low;
-          j < high;
-          j++
-        ) {
-          /*
-           * One comparison.
-           */
-          steps.push({
-            type: "compare",
-            index1: j,
-            index2: high,
-          });
-
-          if (arr[j] < pivot) {
-            i++;
-
-            if (i !== j) {
-              /*
-               * One swap.
-               */
-              const temp = arr[i];
-
-              arr[i] = arr[j];
-              arr[j] = temp;
-
-              steps.push({
-                type: "swap",
-                index1: i,
-                index2: j,
-                array: [...arr],
-              });
-            }
-          }
-        }
-
-        /*
-         * Put pivot into its final position.
-         */
-        if (i + 1 !== high) {
-          const temp = arr[i + 1];
-
-          arr[i + 1] = arr[high];
-          arr[high] = temp;
-
-          steps.push({
-            type: "swap",
-            index1: i + 1,
-            index2: high,
-            array: [...arr],
-          });
-        }
-
-        return i + 1;
-      };
-
-      const sort = (
-        low: number,
-        high: number
-      ): void => {
-        if (low >= high) {
-          return;
-        }
-
-        const pivotIndex = partition(
-          low,
-          high
-        );
-
-        sort(
-          low,
-          pivotIndex - 1
-        );
-
-        sort(
-          pivotIndex + 1,
-          high
-        );
-      };
-
-      sort(
-        0,
-        arr.length - 1
-      );
-
-      return steps;
-    },
-    []
+  const highRef = useRef(
+    initialArray.length - 1
   );
 
-  /*
-   * Perform exactly ONE visualization
-   * operation.
-   */
-  const performStep = useCallback(() => {
-    const steps = stepsRef.current;
+  const iRef = useRef(-1);
 
-    const currentIndex =
-      stepIndexRef.current;
+  const jRef = useRef(0);
 
-    /*
-     * Sorting is finished.
-     */
+  const pivotIndexRef = useRef(
+    initialArray.length - 1
+  );
+
+  const phaseRef = useRef<
+    "partition" | "pivot" | "done"
+  >("partition");
+
+  const stackRef = useRef<
+    { low: number; high: number }[]
+  >([]);
+
+  // -----------------------------------------
+  // CREATE TRACE FRAME
+  // -----------------------------------------
+
+  const addTraceFrame = useCallback(
+    ({
+      line,
+      label,
+      detail,
+      comparing: comparingIndexes = [],
+      swapping: swappingIndexes = [],
+    }: {
+      line: number;
+      label: string;
+      detail: string;
+      comparing?: number[];
+      swapping?: number[];
+    }) => {
+      const frame: SortingTraceFrame = {
+        step: currentTraceStep + 1,
+        line,
+        label,
+        detail,
+        comparing: [...comparingIndexes],
+        swapping: [...swappingIndexes],
+        array: [...arrayRef.current],
+        comparisons: comparisonsRef.current,
+        moves: movesRef.current,
+      };
+
+      setTraceFrames((frames) => [
+        ...frames,
+        frame,
+      ]);
+
+      setCurrentTraceStep(
+        (step) => step + 1
+      );
+    },
+    [currentTraceStep]
+  );
+
+  // -----------------------------------------
+  // PREPARE PARTITION
+  // -----------------------------------------
+
+  const preparePartition = useCallback(() => {
+    const stack = stackRef.current;
+
+    while (stack.length > 0) {
+      const range = stack.pop();
+
+      if (!range) {
+        continue;
+      }
+
+      const { low, high } = range;
+
+      if (low >= high) {
+        continue;
+      }
+
+      lowRef.current = low;
+
+      highRef.current = high;
+
+      pivotIndexRef.current = high;
+
+      iRef.current = low - 1;
+
+      jRef.current = low;
+
+      phaseRef.current = "partition";
+
+      addTraceFrame({
+        line: 2,
+        label: "Choose pivot",
+        detail: `Choose ${arrayRef.current[high]} as the pivot for positions ${low} through ${high}.`,
+      });
+
+      return true;
+    }
+
+    return false;
+  }, [addTraceFrame]);
+
+  // -----------------------------------------
+  // QUICK SORT STEP
+  // -----------------------------------------
+
+  const step = useCallback(() => {
+    const values = [
+      ...arrayRef.current,
+    ];
+
+    const n = values.length;
+
+    if (n < 2) {
+      statusRef.current = "completed";
+
+      setStatus("completed");
+
+      addTraceFrame({
+        line: 7,
+        label: "Array already sorted",
+        detail:
+          "The array contains fewer than two elements, so no sorting is required.",
+      });
+
+      return;
+    }
+
+    // -----------------------------------------
+    // COMPLETE
+    // -----------------------------------------
+
     if (
-      currentIndex >= steps.length
+      phaseRef.current === "done"
     ) {
+      statusRef.current = "completed";
+
+      setStatus("completed");
+
       setComparing([]);
       setSwapping([]);
 
-      if (
-        backendResultRef.current
-      ) {
+      if (backendResultRef.current) {
+        arrayRef.current = [
+          ...backendResultRef.current,
+        ];
+
         setArray([
           ...backendResultRef.current,
         ]);
       }
+
+      addTraceFrame({
+        line: 7,
+        label: "Sorting complete",
+        detail:
+          "Quick Sort has finished and the array is sorted.",
+      });
+
+      return;
+    }
+
+    // -----------------------------------------
+    // PREPARE FIRST PARTITION
+    // -----------------------------------------
+
+    if (
+      stackRef.current.length === 0 &&
+      phaseRef.current === "partition" &&
+      jRef.current === 0
+    ) {
+      if (
+        lowRef.current === 0 &&
+        highRef.current ===
+          n - 1
+      ) {
+        stackRef.current = [
+          {
+            low: 0,
+            high: n - 1,
+          },
+        ];
+
+        if (!preparePartition()) {
+          phaseRef.current = "done";
+          return;
+        }
+      }
+    }
+
+    // -----------------------------------------
+    // PARTITION
+    // -----------------------------------------
+
+    if (
+      phaseRef.current ===
+      "partition"
+    ) {
+      const low = lowRef.current;
+
+      const high = highRef.current;
+
+      const pivot =
+        values[pivotIndexRef.current];
+
+      const j = jRef.current;
+
+      // ---------------------------------------
+      // COMPARE CURRENT ELEMENT WITH PIVOT
+      // ---------------------------------------
+
+      if (j < high) {
+        comparisonsRef.current += 1;
+
+        setComparisons(
+          comparisonsRef.current
+        );
+
+        setComparing([
+          j,
+          pivotIndexRef.current,
+        ]);
+
+        setSwapping([]);
+
+        addTraceFrame({
+          line: 3,
+          label: "Compare with pivot",
+          detail: `Compare ${values[j]} with pivot ${pivot}.`,
+          comparing: [
+            j,
+            pivotIndexRef.current,
+          ],
+        });
+
+        if (values[j] < pivot) {
+          iRef.current += 1;
+
+          const i = iRef.current;
+
+          if (i !== j) {
+            const temp = values[i];
+
+            values[i] = values[j];
+
+            values[j] = temp;
+
+            arrayRef.current = [
+              ...values,
+            ];
+
+            setArray([...values]);
+
+            setComparing([]);
+
+            setSwapping([i, j]);
+
+            movesRef.current += 1;
+
+            setMoves(
+              movesRef.current
+            );
+
+            addTraceFrame({
+              line: 5,
+              label: "Swap elements",
+              detail: `Move ${values[i]} into the lower partition.`,
+              swapping: [i, j],
+            });
+          } else {
+            addTraceFrame({
+              line: 4,
+              label: "Element already positioned",
+              detail: `${values[j]} is smaller than the pivot and is already in the correct partition.`,
+              comparing: [j],
+            });
+          }
+        } else {
+          addTraceFrame({
+            line: 4,
+            label: "Keep element on right",
+            detail: `${values[j]} is greater than or equal to the pivot, so it remains in the right partition.`,
+            comparing: [j],
+          });
+        }
+
+        jRef.current += 1;
+
+        return;
+      }
+
+      // ---------------------------------------
+      // PLACE PIVOT
+      // ---------------------------------------
+
+      const pivotPosition =
+        iRef.current + 1;
+
+      if (
+        pivotPosition !== high
+      ) {
+        const temp =
+          values[pivotPosition];
+
+        values[pivotPosition] =
+          values[high];
+
+        values[high] = temp;
+
+        arrayRef.current = [
+          ...values,
+        ];
+
+        setArray([...values]);
+
+        setComparing([]);
+
+        setSwapping([
+          pivotPosition,
+          high,
+        ]);
+
+        movesRef.current += 1;
+
+        setMoves(
+          movesRef.current
+        );
+
+        addTraceFrame({
+          line: 6,
+          label: "Place pivot",
+          detail: `Move pivot ${values[pivotPosition]} into its final position at index ${pivotPosition}.`,
+          swapping: [
+            pivotPosition,
+            high,
+          ],
+        });
+      } else {
+        setComparing([]);
+        setSwapping([]);
+
+        addTraceFrame({
+          line: 6,
+          label: "Pivot already positioned",
+          detail: `Pivot ${pivot} is already in its final position.`,
+        });
+      }
+
+      // ---------------------------------------
+      // CREATE LEFT / RIGHT RANGES
+      // ---------------------------------------
+
+      const leftLow = low;
+
+      const leftHigh =
+        pivotPosition - 1;
+
+      const rightLow =
+        pivotPosition + 1;
+
+      const rightHigh = high;
+
+      stackRef.current = [];
+
+      /*
+       * Push right first so that the
+       * left partition is processed first.
+       */
+
+      if (
+        rightLow < rightHigh
+      ) {
+        stackRef.current.push({
+          low: rightLow,
+          high: rightHigh,
+        });
+      }
+
+      if (
+        leftLow < leftHigh
+      ) {
+        stackRef.current.push({
+          low: leftLow,
+          high: leftHigh,
+        });
+      }
+
+      phaseRef.current =
+        "partition";
+
+      /*
+       * Prepare the next partition.
+       */
+      if (
+        preparePartition()
+      ) {
+        return;
+      }
+
+      // ---------------------------------------
+      // EVERYTHING FINISHED
+      // ---------------------------------------
+
+      phaseRef.current = "done";
 
       statusRef.current =
         "completed";
 
       setStatus("completed");
 
-      return;
-    }
-
-    const currentStep =
-      steps[currentIndex];
-
-    /*
-     * Comparison step.
-     */
-    if (
-      currentStep.type ===
-      "compare"
-    ) {
-      setComparing([
-        currentStep.index1,
-        currentStep.index2,
-      ]);
-
+      setComparing([]);
       setSwapping([]);
 
-      setComparisons(
-        (value) => value + 1
-      );
+      if (backendResultRef.current) {
+        arrayRef.current = [
+          ...backendResultRef.current,
+        ];
+
+        setArray([
+          ...backendResultRef.current,
+        ]);
+      }
+
+      addTraceFrame({
+        line: 7,
+        label: "Sorting complete",
+        detail:
+          "Quick Sort has finished and the array is sorted.",
+      });
     }
+  }, [addTraceFrame, preparePartition]);
 
-    /*
-     * Swap step.
-     */
-    if (
-      currentStep.type ===
-      "swap"
-    ) {
-      setComparing([]);
+  // -----------------------------------------
+  // AUTOMATIC EXECUTION
+  // -----------------------------------------
 
-      setSwapping([
-        currentStep.index1,
-        currentStep.index2,
-      ]);
-
-      setArray([
-        ...currentStep.array,
-      ]);
-
-      setMoves(
-        (value) => value + 1
-      );
-    }
-
-    stepIndexRef.current++;
-  }, []);
-
-  /*
-   * Automatically perform one step
-   * according to the selected speed.
-   */
   useEffect(() => {
     if (status !== "running") {
       return;
     }
 
-    const timer =
+    const interval =
       window.setInterval(() => {
         if (
           statusRef.current ===
           "running"
         ) {
-          performStep();
+          step();
         }
       }, speed);
 
     return () => {
-      window.clearInterval(timer);
+      window.clearInterval(
+        interval
+      );
     };
-  }, [
-    status,
-    speed,
-    performStep,
-  ]);
+  }, [status, speed, step]);
 
-  /*
-   * Start Quick Sort.
-   */
-  const start = useCallback(
-    async () => {
-      if (
-        statusRef.current ===
-          "running" ||
-        statusRef.current ===
-          "completed"
-      ) {
-        return;
-      }
+  // -----------------------------------------
+  // START
+  // -----------------------------------------
 
-      try {
-        /*
-         * Get the final answer from
-         * FastAPI.
-         */
-        const result =
-          await quickSortAPI(
-            array
-          );
+  const start = useCallback(async () => {
+    if (
+      statusRef.current ===
+        "completed"
+    ) {
+      return;
+    }
 
-        backendResultRef.current =
-          result.array;
-
-        /*
-         * Build the visualization
-         * operations from the current array.
-         */
-        stepsRef.current =
-          createSteps(array);
-
-        stepIndexRef.current = 0;
-
-        setComparisons(0);
-        setMoves(0);
-
-        setComparing([]);
-        setSwapping([]);
-
-        statusRef.current =
-          "running";
-
-        setStatus("running");
-      } catch (error) {
-        console.error(
-          "Quick Sort API error:",
-          error
+    try {
+      const result =
+        await quickSortAPI(
+          arrayRef.current
         );
 
-        statusRef.current =
-          "idle";
+      backendResultRef.current =
+        result.array;
 
-        setStatus("idle");
-      }
-    },
-    [array, createSteps]
-  );
+      /*
+       * Initialize Quick Sort stack.
+       */
+      stackRef.current = [
+        {
+          low: 0,
+          high:
+            arrayRef.current.length -
+            1,
+        },
+      ];
 
-  /*
-   * Pause the animation.
-   */
+      lowRef.current = 0;
+
+      highRef.current =
+        arrayRef.current.length - 1;
+
+      iRef.current = -1;
+
+      jRef.current = 0;
+
+      phaseRef.current =
+        "partition";
+
+      setComparisons(0);
+      setMoves(0);
+
+      comparisonsRef.current = 0;
+      movesRef.current = 0;
+
+      setComparing([]);
+      setSwapping([]);
+
+      statusRef.current = "running";
+
+      setStatus("running");
+    } catch (error) {
+      console.error(
+        "Quick Sort API error:",
+        error
+      );
+
+      statusRef.current = "idle";
+
+      setStatus("idle");
+    }
+  }, []);
+
+  // -----------------------------------------
+  // PAUSE
+  // -----------------------------------------
+
   const pause = useCallback(() => {
     if (
       statusRef.current !==
@@ -366,8 +628,7 @@ export function useQuickSort() {
       return;
     }
 
-    statusRef.current =
-      "paused";
+    statusRef.current = "paused";
 
     setStatus("paused");
 
@@ -375,64 +636,74 @@ export function useQuickSort() {
     setSwapping([]);
   }, []);
 
-  /*
-   * Manually perform ONE step.
-   */
-  const step = useCallback(() => {
-    /*
-     * Don't allow manual stepping
-     * while automatic animation is running.
-     */
-    if (
-      statusRef.current ===
-      "running"
-    ) {
-      return;
-    }
+  // -----------------------------------------
+  // RESET
+  // -----------------------------------------
 
-    /*
-     * If we haven't created the
-     * operations yet, create them.
-     */
-    if (
-      stepsRef.current.length === 0
-    ) {
-      stepsRef.current =
-        createSteps(array);
+  const reset = useCallback(
+    (newArray?: number[]) => {
+      const values =
+        Array.isArray(newArray)
+          ? newArray
+          : initialArray;
 
-      stepIndexRef.current = 0;
+      const copiedArray = [
+        ...values,
+      ];
+
+      arrayRef.current =
+        copiedArray;
+
+      statusRef.current = "idle";
 
       backendResultRef.current =
         null;
 
-      setComparisons(0);
-      setMoves(0);
+      stackRef.current = [];
+
+      lowRef.current = 0;
+
+      highRef.current =
+        copiedArray.length - 1;
+
+      iRef.current = -1;
+
+      jRef.current = 0;
+
+      pivotIndexRef.current =
+        copiedArray.length - 1;
+
+      phaseRef.current =
+        "partition";
+
+      comparisonsRef.current = 0;
+
+      movesRef.current = 0;
+
+      setArray(copiedArray);
+
+      setStatus("idle");
 
       setComparing([]);
       setSwapping([]);
-    }
 
-    /*
-     * Make sure we're in paused/idle
-     * state while manually stepping.
-     */
-    statusRef.current =
-      "paused";
+      setComparisons(0);
+      setMoves(0);
 
-    setStatus("paused");
+      // Reset trace
+      setTraceFrames([]);
 
-    performStep();
-  }, [
-    array,
-    createSteps,
-    performStep,
-  ]);
+      setCurrentTraceStep(0);
+    },
+    [initialArray]
+  );
 
-  /*
-   * Generate a new random array.
-   */
+  // -----------------------------------------
+  // RANDOMIZE
+  // -----------------------------------------
+
   const randomize = useCallback(() => {
-    const newArray =
+    const randomArray =
       Array.from(
         { length: 8 },
         () =>
@@ -441,53 +712,12 @@ export function useQuickSort() {
           ) + 10
       );
 
-    stepsRef.current = [];
+    reset(randomArray);
+  }, [reset]);
 
-    stepIndexRef.current = 0;
-
-    backendResultRef.current =
-      null;
-
-    statusRef.current =
-      "idle";
-
-    setArray(newArray);
-
-    setStatus("idle");
-
-    setComparing([]);
-    setSwapping([]);
-
-    setComparisons(0);
-    setMoves(0);
-  }, []);
-
-  /*
-   * Reset to the original array.
-   */
-  const reset = useCallback(() => {
-    stepsRef.current = [];
-
-    stepIndexRef.current = 0;
-
-    backendResultRef.current =
-      null;
-
-    statusRef.current =
-      "idle";
-
-    setArray([
-      ...initialArray,
-    ]);
-
-    setStatus("idle");
-
-    setComparing([]);
-    setSwapping([]);
-
-    setComparisons(0);
-    setMoves(0);
-  }, []);
+  // -----------------------------------------
+  // RETURN
+  // -----------------------------------------
 
   return {
     array,
@@ -496,12 +726,17 @@ export function useQuickSort() {
     swapping,
     comparisons,
     moves,
+
     speed,
     setSpeed,
+
     start,
     pause,
     step,
     randomize,
     reset,
+
+    traceFrames,
+    currentTraceStep,
   };
 }

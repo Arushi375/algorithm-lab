@@ -1,18 +1,34 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
 import { mergeSortAPI } from "@/lib/api";
 
-type SortStatus =
+import type { SortingTraceFrame } from "@/types/sortingTrace";
+
+export type SortStatus =
   | "idle"
   | "running"
   | "paused"
   | "completed";
 
-const initialArray = [72, 34, 91, 18, 56, 43, 27, 65];
+const DEFAULT_ARRAY = [
+  72,
+  34,
+  91,
+  18,
+  56,
+  43,
+  27,
+  65,
+];
 
-export function useMergeSort() {
-  const [array, setArray] = useState(initialArray);
+export function useMergeSort(
+  initialArray: number[] = DEFAULT_ARRAY
+) {
+  const [array, setArray] = useState<number[]>([
+    ...initialArray,
+  ]);
 
   const [status, setStatus] =
     useState<SortStatus>("idle");
@@ -23,333 +39,712 @@ export function useMergeSort() {
   const [swapping, setSwapping] =
     useState<number[]>([]);
 
-  const [comparisons, setComparisons] = useState(0);
+  const [comparisons, setComparisons] =
+    useState(0);
 
   const [moves, setMoves] = useState(0);
 
   const [speed, setSpeed] = useState(500);
 
-  const pausedRef = useRef(false);
-  const stopRef = useRef(false);
+  // -----------------------------------------
+  // TRACE STATE
+  // -----------------------------------------
 
-  // Stores the sorted result returned by FastAPI.
-  const backendResultRef = useRef<number[] | null>(null);
+  const [traceFrames, setTraceFrames] =
+    useState<SortingTraceFrame[]>([]);
 
-  const sleep = (ms: number) =>
-    new Promise<void>((resolve) => {
-      setTimeout(resolve, ms);
-    });
+  const [currentTraceStep, setCurrentTraceStep] =
+    useState(0);
 
-  const waitIfPaused = async () => {
-    while (
-      pausedRef.current &&
-      !stopRef.current
-    ) {
-      await sleep(100);
-    }
-  };
+  // -----------------------------------------
+  // REFS
+  // -----------------------------------------
 
-  const merge = async (
-    arr: number[],
-    left: number,
-    middle: number,
-    right: number
-  ) => {
-    const leftPart = arr.slice(
-      left,
-      middle + 1
-    );
+  const arrayRef = useRef([
+    ...initialArray,
+  ]);
 
-    const rightPart = arr.slice(
-      middle + 1,
-      right + 1
-    );
+  const statusRef =
+    useRef<SortStatus>("idle");
 
-    let i = 0;
-    let j = 0;
-    let k = left;
+  const comparisonsRef = useRef(0);
 
-    while (
-      i < leftPart.length &&
-      j < rightPart.length
-    ) {
-      if (stopRef.current) {
-        return;
-      }
+  const movesRef = useRef(0);
 
-      await waitIfPaused();
+  const backendResultRef =
+    useRef<number[] | null>(null);
 
-      if (stopRef.current) {
-        return;
-      }
+  // -----------------------------------------
+  // MERGE SORT STEP STATE
+  // -----------------------------------------
 
-      const leftIndex = left + i;
-      const rightIndex = middle + 1 + j;
+  /*
+   * Merge Sort is recursive, so instead of
+   * i/j indexes like Bubble Sort, we keep
+   * track of the current merge operation.
+   */
 
-      setComparing([
-        leftIndex,
-        rightIndex,
+  const mergeSizeRef = useRef(1);
+
+  const mergeLeftRef = useRef(0);
+
+  const mergeIndexRef = useRef(0);
+
+  const mergePhaseRef = useRef<
+    "compare" | "left" | "right" | "done"
+  >("compare");
+
+  const leftPartRef = useRef<number[]>([]);
+
+  const rightPartRef = useRef<number[]>([]);
+
+  const leftIndexRef = useRef(0);
+
+  const rightIndexRef = useRef(0);
+
+  const writeIndexRef = useRef(0);
+
+  // -----------------------------------------
+  // CREATE TRACE FRAME
+  // -----------------------------------------
+
+  const addTraceFrame = useCallback(
+    ({
+      line,
+      label,
+      detail,
+      comparing: comparingIndexes = [],
+      swapping: swappingIndexes = [],
+    }: {
+      line: number;
+      label: string;
+      detail: string;
+      comparing?: number[];
+      swapping?: number[];
+    }) => {
+      const frame: SortingTraceFrame = {
+        step: currentTraceStep + 1,
+        line,
+        label,
+        detail,
+        comparing: [...comparingIndexes],
+        swapping: [...swappingIndexes],
+        array: [...arrayRef.current],
+        comparisons: comparisonsRef.current,
+        moves: movesRef.current,
+      };
+
+      setTraceFrames((frames) => [
+        ...frames,
+        frame,
       ]);
 
-      setComparisons(
-        (value) => value + 1
+      setCurrentTraceStep(
+        (step) => step + 1
       );
+    },
+    [currentTraceStep]
+  );
 
-      await sleep(speed);
+  // -----------------------------------------
+  // PREPARE NEXT MERGE
+  // -----------------------------------------
 
-      if (leftPart[i] <= rightPart[j]) {
-        arr[k] = leftPart[i];
-        i++;
-      } else {
-        arr[k] = rightPart[j];
-        j++;
+  const prepareMerge = useCallback(() => {
+    const values = [...arrayRef.current];
+
+    const n = values.length;
+
+    const size = mergeSizeRef.current;
+
+    const left = mergeLeftRef.current;
+
+    /*
+     * No more merge ranges in this pass.
+     */
+    if (left >= n) {
+      mergeSizeRef.current *= 2;
+
+      mergeLeftRef.current = 0;
+
+      if (mergeSizeRef.current >= n) {
+        return false;
       }
 
-      setArray([...arr]);
-
-      setSwapping([k]);
-
-      setMoves(
-        (value) => value + 1
-      );
-
-      await sleep(speed);
-
-      setSwapping([]);
-
-      k++;
+      return prepareMerge();
     }
 
-    while (i < leftPart.length) {
-      if (stopRef.current) {
-        return;
-      }
+    const middle = Math.min(
+      left + size,
+      n
+    );
 
-      await waitIfPaused();
+    const right = Math.min(
+      left + size * 2,
+      n
+    );
 
-      if (stopRef.current) {
-        return;
-      }
+    /*
+     * If there is no right half,
+     * move to the next merge.
+     */
+    if (middle >= right) {
+      mergeLeftRef.current =
+        left + size * 2;
 
-      arr[k] = leftPart[i];
-
-      setArray([...arr]);
-
-      setSwapping([k]);
-
-      setMoves(
-        (value) => value + 1
-      );
-
-      await sleep(speed);
-
-      setSwapping([]);
-
-      i++;
-      k++;
+      return prepareMerge();
     }
 
-    while (j < rightPart.length) {
-      if (stopRef.current) {
-        return;
-      }
+    leftPartRef.current =
+      values.slice(left, middle);
 
-      await waitIfPaused();
+    rightPartRef.current =
+      values.slice(middle, right);
 
-      if (stopRef.current) {
-        return;
-      }
+    leftIndexRef.current = 0;
 
-      arr[k] = rightPart[j];
+    rightIndexRef.current = 0;
 
-      setArray([...arr]);
+    writeIndexRef.current = left;
 
-      setSwapping([k]);
+    mergeIndexRef.current = left;
 
-      setMoves(
-        (value) => value + 1
-      );
+    mergePhaseRef.current = "compare";
 
-      await sleep(speed);
+    addTraceFrame({
+      line: 4,
+      label: "Split array",
+      detail: `Preparing to merge two sorted sections starting at position ${left}.`,
+    });
 
-      setSwapping([]);
+    return true;
+  }, [addTraceFrame]);
 
-      j++;
-      k++;
+  // -----------------------------------------
+  // MERGE SORT STEP
+  // -----------------------------------------
+
+  const step = useCallback(() => {
+    const values = [
+      ...arrayRef.current,
+    ];
+
+    const n = values.length;
+
+    if (n < 2) {
+      statusRef.current = "completed";
+
+      setStatus("completed");
+
+      addTraceFrame({
+        line: 7,
+        label: "Array already sorted",
+        detail:
+          "The array contains fewer than two elements, so no sorting is required.",
+      });
+
+      return;
     }
-  };
 
-  const mergeSort = async (
-    arr: number[],
-    left: number,
-    right: number
-  ): Promise<void> => {
+    // -----------------------------------------
+    // SORTING COMPLETE
+    // -----------------------------------------
+
     if (
-      left >= right ||
-      stopRef.current
+      mergeSizeRef.current >= n &&
+      mergeLeftRef.current === 0 &&
+      mergePhaseRef.current === "done"
+    ) {
+      statusRef.current = "completed";
+
+      setStatus("completed");
+
+      setComparing([]);
+      setSwapping([]);
+
+      if (backendResultRef.current) {
+        arrayRef.current = [
+          ...backendResultRef.current,
+        ];
+
+        setArray([
+          ...backendResultRef.current,
+        ]);
+      }
+
+      addTraceFrame({
+        line: 7,
+        label: "Sorting complete",
+        detail:
+          "Merge Sort has finished and the array is sorted.",
+      });
+
+      return;
+    }
+
+    // -----------------------------------------
+    // PREPARE A MERGE
+    // -----------------------------------------
+
+    if (
+      mergePhaseRef.current === "done"
+    ) {
+      const prepared = prepareMerge();
+
+      if (!prepared) {
+        mergePhaseRef.current = "done";
+
+        if (
+          mergeSizeRef.current >= n
+        ) {
+          statusRef.current =
+            "completed";
+
+          setStatus("completed");
+
+          if (
+            backendResultRef.current
+          ) {
+            arrayRef.current = [
+              ...backendResultRef.current,
+            ];
+
+            setArray([
+              ...backendResultRef.current,
+            ]);
+          }
+
+          setComparing([]);
+          setSwapping([]);
+
+          addTraceFrame({
+            line: 7,
+            label: "Sorting complete",
+            detail:
+              "Merge Sort has finished and the array is sorted.",
+          });
+        }
+
+        return;
+      }
+    }
+
+    // -----------------------------------------
+    // PREPARE FIRST MERGE
+    // -----------------------------------------
+
+    if (
+      leftPartRef.current.length === 0 &&
+      rightPartRef.current.length === 0
+    ) {
+      const prepared = prepareMerge();
+
+      if (!prepared) {
+        mergePhaseRef.current = "done";
+
+        return;
+      }
+    }
+
+    const left =
+      mergeLeftRef.current;
+
+    const leftPart =
+      leftPartRef.current;
+
+    const rightPart =
+      rightPartRef.current;
+
+    const leftIndex =
+      leftIndexRef.current;
+
+    const rightIndex =
+      rightIndexRef.current;
+
+    const writeIndex =
+      writeIndexRef.current;
+
+    // -----------------------------------------
+    // COMPARE
+    // -----------------------------------------
+
+    if (
+      mergePhaseRef.current ===
+      "compare"
+    ) {
+      if (
+        leftIndex <
+          leftPart.length &&
+        rightIndex <
+          rightPart.length
+      ) {
+        const leftPosition =
+          left + leftIndex;
+
+        const rightPosition =
+          left +
+          mergeSizeRef.current +
+          rightIndex;
+
+        comparisonsRef.current += 1;
+
+        setComparisons(
+          comparisonsRef.current
+        );
+
+        setComparing([
+          leftPosition,
+          rightPosition,
+        ]);
+
+        setSwapping([]);
+
+        addTraceFrame({
+          line: 8,
+          label: "Compare elements",
+          detail: `Compare ${leftPart[leftIndex]} and ${rightPart[rightIndex]}.`,
+          comparing: [
+            leftPosition,
+            rightPosition,
+          ],
+        });
+
+        /*
+         * Decide which side should be
+         * written during the NEXT step.
+         */
+
+        if (
+          leftPart[leftIndex] <=
+          rightPart[rightIndex]
+        ) {
+          mergePhaseRef.current =
+            "left";
+        } else {
+          mergePhaseRef.current =
+            "right";
+        }
+
+        return;
+      }
+
+      /*
+       * Left side exhausted.
+       */
+      if (
+        leftIndex >=
+        leftPart.length
+      ) {
+        mergePhaseRef.current =
+          "right";
+
+        return step();
+      }
+
+      /*
+       * Right side exhausted.
+       */
+      if (
+        rightIndex >=
+        rightPart.length
+      ) {
+        mergePhaseRef.current =
+          "left";
+
+        return step();
+      }
+    }
+
+    // -----------------------------------------
+    // WRITE LEFT ELEMENT
+    // -----------------------------------------
+
+    if (
+      mergePhaseRef.current ===
+      "left"
+    ) {
+      if (
+        leftIndexRef.current <
+        leftPart.length
+      ) {
+        const value =
+          leftPart[
+            leftIndexRef.current
+          ];
+
+        values[
+          writeIndexRef.current
+        ] = value;
+
+        arrayRef.current = [
+          ...values,
+        ];
+
+        setArray([...values]);
+
+        setComparing([]);
+
+        setSwapping([
+          writeIndexRef.current,
+        ]);
+
+        movesRef.current += 1;
+
+        setMoves(
+          movesRef.current
+        );
+
+        addTraceFrame({
+          line: 10,
+          label: "Take left element",
+          detail: `${value} is smaller or equal, so it is placed at position ${writeIndexRef.current}.`,
+          swapping: [
+            writeIndexRef.current,
+          ],
+        });
+
+        leftIndexRef.current += 1;
+
+        writeIndexRef.current += 1;
+
+        mergePhaseRef.current =
+          "compare";
+
+        return;
+      }
+
+      mergePhaseRef.current =
+        "right";
+
+      return step();
+    }
+
+    // -----------------------------------------
+    // WRITE RIGHT ELEMENT
+    // -----------------------------------------
+
+    if (
+      mergePhaseRef.current ===
+      "right"
+    ) {
+      if (
+        rightIndexRef.current <
+        rightPart.length
+      ) {
+        const value =
+          rightPart[
+            rightIndexRef.current
+          ];
+
+        values[
+          writeIndexRef.current
+        ] = value;
+
+        arrayRef.current = [
+          ...values,
+        ];
+
+        setArray([...values]);
+
+        setComparing([]);
+
+        setSwapping([
+          writeIndexRef.current,
+        ]);
+
+        movesRef.current += 1;
+
+        setMoves(
+          movesRef.current
+        );
+
+        addTraceFrame({
+          line: 12,
+          label: "Take right element",
+          detail: `${value} is smaller, so it is placed at position ${writeIndexRef.current}.`,
+          swapping: [
+            writeIndexRef.current,
+          ],
+        });
+
+        rightIndexRef.current += 1;
+
+        writeIndexRef.current += 1;
+
+        mergePhaseRef.current =
+          "compare";
+
+        return;
+      }
+
+      // -----------------------------------------
+      // MERGE COMPLETE
+      // -----------------------------------------
+
+      mergeLeftRef.current +=
+        mergeSizeRef.current * 2;
+
+      leftPartRef.current = [];
+      rightPartRef.current = [];
+
+      setComparing([]);
+      setSwapping([]);
+
+      mergePhaseRef.current =
+        "done";
+
+      return;
+    }
+  }, [addTraceFrame, prepareMerge]);
+
+  // -----------------------------------------
+  // AUTOMATIC EXECUTION
+  // -----------------------------------------
+
+  useEffect(() => {
+    if (status !== "running") {
+      return;
+    }
+
+    const interval =
+      window.setInterval(() => {
+        if (
+          statusRef.current ===
+          "running"
+        ) {
+          step();
+        }
+      }, speed);
+
+    return () => {
+      window.clearInterval(
+        interval
+      );
+    };
+  }, [status, speed, step]);
+
+  // -----------------------------------------
+  // START
+  // -----------------------------------------
+
+  const start = useCallback(async () => {
+    if (
+      statusRef.current ===
+      "completed"
     ) {
       return;
     }
-
-    await waitIfPaused();
-
-    if (stopRef.current) {
-      return;
-    }
-
-    const middle = Math.floor(
-      (left + right) / 2
-    );
-
-    await mergeSort(
-      arr,
-      left,
-      middle
-    );
-
-    await mergeSort(
-      arr,
-      middle + 1,
-      right
-    );
-
-    await merge(
-      arr,
-      left,
-      middle,
-      right
-    );
-  };
-
-  const start = async () => {
-    if (
-      status === "running" ||
-      status === "completed"
-    ) {
-      return;
-    }
-
-    pausedRef.current = false;
-    stopRef.current = false;
-
-    setStatus("running");
-
-    setComparisons(0);
-    setMoves(0);
-
-    setComparing([]);
-    setSwapping([]);
 
     try {
-      /*
-       * Ask FastAPI to calculate the final
-       * Merge Sort result.
-       */
-      const result = await mergeSortAPI(
-        array
-      );
+      const result =
+        await mergeSortAPI(
+          arrayRef.current
+        );
 
       backendResultRef.current =
         result.array;
 
-      /*
-       * Run the existing frontend animation.
-       */
-      const arr = [...array];
+      statusRef.current =
+        "running";
 
-      await mergeSort(
-        arr,
-        0,
-        arr.length - 1
-      );
-
-      if (!stopRef.current) {
-        /*
-         * Use the backend result as the
-         * final source of truth.
-         */
-        if (backendResultRef.current) {
-          setArray([
-            ...backendResultRef.current,
-          ]);
-        } else {
-          setArray(arr);
-        }
-
-        setComparing([]);
-        setSwapping([]);
-
-        setStatus("completed");
-      }
+      setStatus("running");
     } catch (error) {
       console.error(
         "Merge Sort API error:",
         error
       );
+    }
+  }, []);
 
-      /*
-       * Don't leave the UI stuck in
-       * the running state if the API fails.
-       */
+  // -----------------------------------------
+  // PAUSE
+  // -----------------------------------------
+
+  const pause = useCallback(() => {
+    statusRef.current = "paused";
+
+    setStatus("paused");
+  }, []);
+
+  // -----------------------------------------
+  // RESET
+  // -----------------------------------------
+
+  const reset = useCallback(
+    (newArray?: number[]) => {
+      const values =
+        Array.isArray(newArray)
+          ? newArray
+          : initialArray;
+
+      const copiedArray = [
+        ...values,
+      ];
+
+      arrayRef.current =
+        copiedArray;
+
+      statusRef.current =
+        "idle";
+
+      backendResultRef.current =
+        null;
+
+      mergeSizeRef.current = 1;
+
+      mergeLeftRef.current = 0;
+
+      mergeIndexRef.current = 0;
+
+      mergePhaseRef.current =
+        "compare";
+
+      leftPartRef.current = [];
+      rightPartRef.current = [];
+
+      leftIndexRef.current = 0;
+      rightIndexRef.current = 0;
+      writeIndexRef.current = 0;
+
+      comparisonsRef.current = 0;
+      movesRef.current = 0;
+
+      setArray(copiedArray);
+
       setStatus("idle");
-    }
-  };
 
-  const pause = () => {
-    if (status === "running") {
-      pausedRef.current = true;
+      setComparing([]);
+      setSwapping([]);
 
-      setStatus("paused");
-    }
-  };
+      setComparisons(0);
+      setMoves(0);
 
-  const step = () => {
-    // Step functionality can be added later.
-  };
+      setTraceFrames([]);
+      setCurrentTraceStep(0);
+    },
+    [initialArray]
+  );
 
-  const randomize = () => {
-    stopRef.current = true;
-    pausedRef.current = false;
+  // -----------------------------------------
+  // RANDOMIZE
+  // -----------------------------------------
 
-    backendResultRef.current = null;
+  const randomize = useCallback(() => {
+    const randomArray =
+      Array.from(
+        { length: 8 },
+        () =>
+          Math.floor(
+            Math.random() * 90
+          ) + 10
+      );
 
-    const newArray = Array.from(
-      { length: 8 },
-      () =>
-        Math.floor(
-          Math.random() * 90
-        ) + 10
-    );
+    reset(randomArray);
+  }, [reset]);
 
-    setArray(newArray);
-
-    setStatus("idle");
-
-    setComparing([]);
-    setSwapping([]);
-
-    setComparisons(0);
-    setMoves(0);
-  };
-
-  const reset = () => {
-    stopRef.current = true;
-    pausedRef.current = false;
-
-    backendResultRef.current = null;
-
-    setArray([
-      ...initialArray,
-    ]);
-
-    setStatus("idle");
-
-    setComparing([]);
-    setSwapping([]);
-
-    setComparisons(0);
-    setMoves(0);
-  };
+  // -----------------------------------------
+  // RETURN
+  // -----------------------------------------
 
   return {
     array,
@@ -360,10 +755,14 @@ export function useMergeSort() {
     moves,
     speed,
     setSpeed,
+
     start,
     pause,
-    step,
-    randomize,
     reset,
+    randomize,
+    step,
+
+    traceFrames,
+    currentTraceStep,
   };
 }

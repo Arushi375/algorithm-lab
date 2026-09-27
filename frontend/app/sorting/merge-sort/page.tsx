@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useMergeSort } from "@/hooks/useMergeSort";
@@ -25,6 +24,10 @@ export default function MergeSortPage() {
       step={mergeSort.step}
       randomize={mergeSort.randomize}
       reset={mergeSort.reset}
+
+      traceFrames={mergeSort.traceFrames}
+      currentTraceStep={mergeSort.currentTraceStep}
+
       explanation={
         <>
           <p>
